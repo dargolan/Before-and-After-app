@@ -1,0 +1,11 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="40dp"
+    android:height="40dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <!-- Material Symbols Outlined: add_photo_alternate (36dp, wght300) -->
+    <!-- Path converted from SVG viewBox 0 -960 960 960 -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M480,480ZM202.57,820q-25.79,0 -44.18,-18.39T140,757.43v-554.86q0,-25.79 18.39,-44.18T202.57,140h322.04v-50.26H202.57q-5.39,0 -8.85,-3.46t-3.46,-8.85v554.86q0,5.39 3.46,8.85t8.85,3.46h554.86q5.39,0 8.85,-3.46t3.46,-8.85v-322.04H820v322.04q0,25.79 -18.39,44.18T757.43,820H202.57ZM255.39,666.61h449.22l-136.64,-182.1 -123.38,159.16 -86.9,-109.98 -102.3,132.92ZM686.36,357.44v-83.39h-83.8v-50.25h83.8V140h50.25v83.8H820v50.25h-83.39v83.39h-50.25Z"/>
+</vector>

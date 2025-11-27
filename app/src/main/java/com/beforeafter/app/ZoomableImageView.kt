@@ -35,6 +35,7 @@ class ZoomableImageView @JvmOverloads constructor(
     private var maxScale = 3f
     private var overlayText = "" // Text to overlay on image
     private var showText = true // Whether to show text overlay
+    private var textWasClicked = false // Track if text was clicked to prevent image click
     
     // Click listener for text editing
     var onTextClickListener: (() -> Unit)? = null
@@ -142,6 +143,7 @@ class ZoomableImageView @JvmOverloads constructor(
                 lastTouchPoint.set(currentPoint)
                 startTouchPoint.set(currentPoint)
                 mode = DRAG
+                textWasClicked = false // Reset flag
                 
                 // Check if click is on text for editing (priority over image click)
                 if (showText && overlayText.isNotEmpty()) {
@@ -156,7 +158,8 @@ class ZoomableImageView @JvmOverloads constructor(
                     )
                     
                     if (textRect.contains(currentPoint.x, currentPoint.y)) {
-                        // Text was clicked, trigger edit
+                        // Text was clicked, trigger edit and mark flag
+                        textWasClicked = true
                         onTextClickListener?.invoke()
                         return true
                     }
@@ -189,13 +192,14 @@ class ZoomableImageView @JvmOverloads constructor(
                     val dx = abs(currentPoint.x - startTouchPoint.x)
                     val dy = abs(currentPoint.y - startTouchPoint.y)
                     
-                    // If it was a short tap (not a drag), trigger image replacement
-                    if (dx < 10f && dy < 10f && drawable != null) {
+                    // Only trigger image click if text wasn't clicked and it was a short tap
+                    if (!textWasClicked && dx < 10f && dy < 10f && drawable != null) {
                         onImageClickListener?.invoke()
                         return true
                     }
                 }
                 mode = NONE
+                textWasClicked = false // Reset flag
             }
         }
         
@@ -352,10 +356,24 @@ class ZoomableImageView @JvmOverloads constructor(
     fun getOverlayText(): String = overlayText
     
     fun rotateImage(degrees: Float = 90f) {
+        // Update rotation angle
         rotation += degrees
         rotation = rotation % 360f
         if (rotation < 0) rotation += 360f
-        setImageToCenter()
+        
+        // Get current matrix to preserve scale and translation
+        val values = FloatArray(9)
+        matrix.getValues(values)
+        
+        // Calculate rotation center (center of view)
+        val centerX = viewWidth / 2f
+        val centerY = viewHeight / 2f
+        
+        // Rotate the existing matrix around the center point
+        // This preserves the current scale and translation
+        matrix.postRotate(degrees, centerX, centerY)
+        
+        imageMatrix = matrix
         invalidate()
     }
 }

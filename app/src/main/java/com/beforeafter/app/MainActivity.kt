@@ -5,6 +5,7 @@ import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Matrix
 import android.graphics.drawable.BitmapDrawable
@@ -21,6 +22,7 @@ import android.text.style.ClickableSpan
 import android.text.style.ForegroundColorSpan
 import android.text.style.UnderlineSpan
 import android.view.View
+import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -36,6 +38,7 @@ import com.google.android.gms.ads.interstitial.InterstitialAd
 import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.ActivityOptionsCompat
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -75,10 +78,20 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var beforeImageLauncher: ActivityResultLauncher<Intent>
     private lateinit var afterImageLauncher: ActivityResultLauncher<Intent>
+    private lateinit var beforeCameraLauncher: ActivityResultLauncher<Intent>
+    private lateinit var afterCameraLauncher: ActivityResultLauncher<Intent>
+    private var cameraResultFile: File? = null
+    private var cameraImageUri: Uri? = null
+    private var cameraImageFile: File? = null // Track the actual file
+    private var isCameraForBefore: Boolean = true // Track which slot we're capturing for
+    private var shareLoadingOverlay: View? = null // Loading overlay for share button
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         try {
+            // Override window animations to prevent black screen transitions
+            window.setWindowAnimations(android.R.style.Animation_Activity)
+            
             setContentView(R.layout.activity_main)
 
             // Initialize AdMob
@@ -86,6 +99,7 @@ class MainActivity : AppCompatActivity() {
             
             initializeViews()
             setupImageLaunchers()
+            setupCameraLaunchers()
             setupClickListeners()
             setupFooterLink()
             loadInterstitialAd()
@@ -95,6 +109,12 @@ class MainActivity : AppCompatActivity() {
             e.printStackTrace()
             Toast.makeText(this, "Error initializing app", Toast.LENGTH_SHORT).show()
         }
+    }
+    
+    override fun onResume() {
+        super.onResume()
+        // Override transition when returning from camera to prevent black screen
+        overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
     }
 
     private fun initializeViews() {
@@ -120,21 +140,8 @@ class MainActivity : AppCompatActivity() {
         ) { result ->
                                if (result.resultCode == RESULT_OK && result.data != null) {
                        val imageUri = result.data?.data
-                       try {
-                           val originalBitmap = MediaStore.Images.Media.getBitmap(contentResolver, imageUri)
-                           beforeBitmap = fixImageOrientation(originalBitmap, imageUri!!)
-                           imageViewBefore.setImageBitmap(beforeBitmap)
-                    imageViewBefore.setOverlayText("BEFORE")
-                    imageViewBefore.onTextClickListener = {
-                        showTextEditDialog(imageViewBefore, "Edit Before Text")
-                    }
-                    imageViewBefore.onImageClickListener = {
-                        selectBeforeImage() // Allow replacing the image
-                    }
-                                               plusIconBefore.visibility = View.GONE
-                           controlsBefore.visibility = View.VISIBLE
-                } catch (e: IOException) {
-                    Toast.makeText(this, "Error loading before image", Toast.LENGTH_SHORT).show()
+                if (imageUri != null) {
+                    loadImageFromUri(imageUri, true)
                 }
             }
         }
@@ -144,30 +151,502 @@ class MainActivity : AppCompatActivity() {
         ) { result ->
                                if (result.resultCode == RESULT_OK && result.data != null) {
                        val imageUri = result.data?.data
-                       try {
-                           val originalBitmap = MediaStore.Images.Media.getBitmap(contentResolver, imageUri)
-                           afterBitmap = fixImageOrientation(originalBitmap, imageUri!!)
+                if (imageUri != null) {
+                    loadImageFromUri(imageUri, false)
+                }
+            }
+        }
+    }
+    
+    private fun setupCameraLaunchers() {
+        beforeCameraLauncher = registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            if (result.resultCode == RESULT_OK) {
+                val uriString = result.data?.getStringExtra(CameraActivity.EXTRA_OUTPUT_URI)
+                if (uriString != null) {
+                    val uri = Uri.parse(uriString)
+                    handleCameraResultFromCustomCamera(uri, true)
+                } else {
+                    handleCameraResult(true)
+                }
+            }
+        }
+
+        afterCameraLauncher = registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            if (result.resultCode == RESULT_OK) {
+                val uriString = result.data?.getStringExtra(CameraActivity.EXTRA_OUTPUT_URI)
+                if (uriString != null) {
+                    val uri = Uri.parse(uriString)
+                    handleCameraResultFromCustomCamera(uri, false)
+                } else {
+                    handleCameraResult(false)
+                }
+            }
+        }
+    }
+    
+    private fun handleCameraResultFromCustomCamera(imageUri: Uri, isBefore: Boolean) {
+        // CRITICAL: Capture the other slot's state IMMEDIATELY
+        var otherSlotBitmap: Bitmap? = null
+        var otherSlotOverlayText: String? = null
+        var otherSlotControlsVisible = false
+        
+        if (isBefore) {
+            otherSlotBitmap = afterBitmap
+            otherSlotOverlayText = if (afterBitmap != null) imageViewAfter.getOverlayText() else null
+            otherSlotControlsVisible = controlsAfter.visibility == View.VISIBLE
+        } else {
+            otherSlotBitmap = beforeBitmap
+            otherSlotOverlayText = if (beforeBitmap != null) imageViewBefore.getOverlayText() else null
+            otherSlotControlsVisible = controlsBefore.visibility == View.VISIBLE
+        }
+        
+        // Load image in background thread
+        Thread {
+            try {
+                // Load bitmap directly from file
+                val file = File(imageUri.path ?: return@Thread)
+                if (!file.exists() || file.length() == 0L) {
+                    runOnUiThread {
+                        Toast.makeText(this, "Error: Camera image not found", Toast.LENGTH_SHORT).show()
+                    }
+                    return@Thread
+                }
+                
+                val bitmap = BitmapFactory.decodeFile(file.absolutePath) ?: run {
+                    runOnUiThread {
+                        Toast.makeText(this, "Error: Could not load image", Toast.LENGTH_SHORT).show()
+                    }
+                    return@Thread
+                }
+                
+                // Fix orientation
+                val fixedBitmap = fixImageOrientation(bitmap, imageUri)
+                
+                // Update UI on main thread
+                val preservedOtherBitmap = otherSlotBitmap
+                val preservedOtherOverlayText = otherSlotOverlayText
+                val preservedOtherControlsVisible = otherSlotControlsVisible
+                
+                runOnUiThread {
+                    try {
+                        // CRITICAL: Restore other slot FIRST
+                        if (preservedOtherBitmap != null) {
+                            if (isBefore) {
+                                afterBitmap = preservedOtherBitmap
+                                imageViewAfter.setImageBitmap(afterBitmap!!)
+                                imageViewAfter.setOverlayText(preservedOtherOverlayText ?: "AFTER")
+                                imageViewAfter.onTextClickListener = {
+                                    showTextEditDialog(imageViewAfter, "Edit After Text")
+                                }
+                                imageViewAfter.onImageClickListener = {
+                                    showImageSourceDialog(false)
+                                }
+                                if (!preservedOtherControlsVisible) {
+                                    plusIconAfter.visibility = View.GONE
+                                    controlsAfter.visibility = View.VISIBLE
+                                }
+                            } else {
+                                beforeBitmap = preservedOtherBitmap
+                                imageViewBefore.setImageBitmap(beforeBitmap!!)
+                                imageViewBefore.setOverlayText(preservedOtherOverlayText ?: "BEFORE")
+                                imageViewBefore.onTextClickListener = {
+                                    showTextEditDialog(imageViewBefore, "Edit Before Text")
+                                }
+                                imageViewBefore.onImageClickListener = {
+                                    showImageSourceDialog(true)
+                                }
+                                if (!preservedOtherControlsVisible) {
+                                    plusIconBefore.visibility = View.GONE
+                                    controlsBefore.visibility = View.VISIBLE
+                                }
+                            }
+                        }
+                        
+                        // Now load the new image
+                        if (isBefore) {
+                            beforeBitmap = fixedBitmap
+                            imageViewBefore.setImageBitmap(beforeBitmap!!)
+                            imageViewBefore.setOverlayText("BEFORE")
+                            imageViewBefore.onTextClickListener = {
+                                showTextEditDialog(imageViewBefore, "Edit Before Text")
+                            }
+                            imageViewBefore.onImageClickListener = {
+                                showImageSourceDialog(true)
+                            }
+                            plusIconBefore.visibility = View.GONE
+                            controlsBefore.visibility = View.VISIBLE
+                        } else {
+                            afterBitmap = fixedBitmap
+                            imageViewAfter.setImageBitmap(afterBitmap!!)
+                            imageViewAfter.setOverlayText("AFTER")
+                            imageViewAfter.onTextClickListener = {
+                                showTextEditDialog(imageViewAfter, "Edit After Text")
+                            }
+                            imageViewAfter.onImageClickListener = {
+                                showImageSourceDialog(false)
+                            }
+                            plusIconAfter.visibility = View.GONE
+                            controlsAfter.visibility = View.VISIBLE
+                        }
+                    } catch (e: Exception) {
+                        Toast.makeText(this, "Error loading camera image: ${e.message}", Toast.LENGTH_SHORT).show()
+                        e.printStackTrace()
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this, "Error loading camera image: ${e.message}", Toast.LENGTH_SHORT).show()
+                    e.printStackTrace()
+                }
+            }
+        }.start()
+    }
+    
+    private fun handleCameraResult(isBefore: Boolean) {
+        // CRITICAL: Capture the other slot's state IMMEDIATELY on UI thread before background work
+        // This ensures we have the actual current state, not a stale reference
+        var otherSlotBitmap: Bitmap? = null
+        var otherSlotOverlayText: String? = null
+        var otherSlotControlsVisible = false
+        
+        runOnUiThread {
+            if (isBefore) {
+                otherSlotBitmap = afterBitmap
+                otherSlotOverlayText = if (afterBitmap != null) imageViewAfter.getOverlayText() else null
+                otherSlotControlsVisible = controlsAfter.visibility == View.VISIBLE
+            } else {
+                otherSlotBitmap = beforeBitmap
+                otherSlotOverlayText = if (beforeBitmap != null) imageViewBefore.getOverlayText() else null
+                otherSlotControlsVisible = controlsBefore.visibility == View.VISIBLE
+            }
+        }
+        
+        // Store references for later use
+        val otherSlotImageView = if (isBefore) imageViewAfter else imageViewBefore
+        val otherSlotControls = if (isBefore) controlsAfter else controlsBefore
+        val otherSlotPlusIcon = if (isBefore) plusIconAfter else plusIconBefore
+        
+        // NEW APPROACH: Query MediaStore for the most recent image taken
+        // This works regardless of where the camera app saved the file
+        Thread {
+            try {
+                // Minimal wait time for faster response
+                Thread.sleep(100)
+                
+                // Query MediaStore for the most recently added image
+                val projection = arrayOf(
+                    MediaStore.Images.Media._ID,
+                    MediaStore.Images.Media.DATA,
+                    MediaStore.Images.Media.DATE_ADDED
+                )
+                val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
+                
+                // Get current time in seconds (DATE_ADDED is in seconds since epoch)
+                val currentTimeSeconds = System.currentTimeMillis() / 1000
+                // Look for images added in the last 10 seconds
+                val timeThreshold = currentTimeSeconds - 10
+                
+                val cursor = contentResolver.query(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    projection,
+                    "${MediaStore.Images.Media.DATE_ADDED} > ?",
+                    arrayOf(timeThreshold.toString()),
+                    sortOrder
+                )
+                
+                var loadedBitmap: Bitmap? = null
+                var imageUri: Uri? = null
+                
+                cursor?.use {
+                    if (it.moveToFirst()) {
+                        val idColumn = it.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                        val id = it.getLong(idColumn)
+                        imageUri = Uri.withAppendedPath(
+                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                            id.toString()
+                        )
+                        
+                        // Load bitmap in background thread BEFORE switching to UI thread
+                        try {
+                            loadedBitmap = if (imageUri!!.scheme == "file") {
+                                android.graphics.BitmapFactory.decodeFile(imageUri!!.path)
+                            } else {
+                                contentResolver.openInputStream(imageUri!!)?.use { inputStream ->
+                                    android.graphics.BitmapFactory.decodeStream(inputStream)
+                                }
+                            }
+                            // Fix orientation
+                            if (loadedBitmap != null) {
+                                loadedBitmap = fixImageOrientation(loadedBitmap!!, imageUri!!)
+                            }
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }
+                }
+                
+                // If MediaStore query failed, try the file we created as fallback
+                if (loadedBitmap == null) {
+                    val file = cameraImageFile
+                    if (file != null) {
+                        // Wait for file with retries
+                        var attempts = 0
+                        while (!file.exists() || file.length() == 0L) {
+                            if (attempts >= 15) break
+                            Thread.sleep(200)
+                            attempts++
+                        }
+                        
+                        if (file.exists() && file.length() > 0) {
+                            try {
+                                loadedBitmap = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
+                                imageUri = Uri.fromFile(file)
+                                if (loadedBitmap != null && imageUri != null) {
+                                    loadedBitmap = fixImageOrientation(loadedBitmap!!, imageUri!!)
+                                }
+                                MediaScannerConnection.scanFile(
+                                    this@MainActivity,
+                                    arrayOf(file.absolutePath),
+                                    null,
+                                    null
+                                )
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
+                        }
+                    }
+                }
+                
+                // Now load on UI thread with bitmap already ready (instant display)
+                val finalBitmap = loadedBitmap
+                val preservedOtherBitmap = otherSlotBitmap
+                val preservedOtherOverlayText = otherSlotOverlayText
+                val preservedOtherControlsVisible = otherSlotControlsVisible
+                
+                if (finalBitmap != null) {
+                    runOnUiThread {
+                        try {
+                            // CRITICAL: ALWAYS restore the other slot FIRST, before loading new image
+                            // This ensures it never gets cleared
+                            if (preservedOtherBitmap != null) {
+                                if (isBefore) {
+                                    // Restore AFTER slot
+                                    afterBitmap = preservedOtherBitmap
+                                    imageViewAfter.setImageBitmap(afterBitmap!!)
+                                    imageViewAfter.setOverlayText(preservedOtherOverlayText ?: "AFTER")
+                                    imageViewAfter.onTextClickListener = {
+                                        showTextEditDialog(imageViewAfter, "Edit After Text")
+                                    }
+                                    imageViewAfter.onImageClickListener = {
+                                        showImageSourceDialog(false)
+                                    }
+                                    if (!preservedOtherControlsVisible) {
+                                        plusIconAfter.visibility = View.GONE
+                                        controlsAfter.visibility = View.VISIBLE
+                                    }
+                                } else {
+                                    // Restore BEFORE slot
+                                    beforeBitmap = preservedOtherBitmap
+                                    imageViewBefore.setImageBitmap(beforeBitmap!!)
+                                    imageViewBefore.setOverlayText(preservedOtherOverlayText ?: "BEFORE")
+                                    imageViewBefore.onTextClickListener = {
+                                        showTextEditDialog(imageViewBefore, "Edit Before Text")
+                                    }
+                                    imageViewBefore.onImageClickListener = {
+                                        showImageSourceDialog(true)
+                                    }
+                                    if (!preservedOtherControlsVisible) {
+                                        plusIconBefore.visibility = View.GONE
+                                        controlsBefore.visibility = View.VISIBLE
+                                    }
+                                }
+                            }
+                            
+                            // Now load the new image (AFTER ensuring other slot is preserved)
+                            if (isBefore) {
+                                beforeBitmap = finalBitmap
+                                imageViewBefore.setImageBitmap(beforeBitmap!!)
+                                imageViewBefore.setOverlayText("BEFORE")
+                                imageViewBefore.onTextClickListener = {
+                                    showTextEditDialog(imageViewBefore, "Edit Before Text")
+                                }
+                                imageViewBefore.onImageClickListener = {
+                                    showImageSourceDialog(true)
+                                }
+                                plusIconBefore.visibility = View.GONE
+                                controlsBefore.visibility = View.VISIBLE
+                            } else {
+                                afterBitmap = finalBitmap
+                                imageViewAfter.setImageBitmap(afterBitmap!!)
+                                imageViewAfter.setOverlayText("AFTER")
+                                imageViewAfter.onTextClickListener = {
+                                    showTextEditDialog(imageViewAfter, "Edit After Text")
+                                }
+                                imageViewAfter.onImageClickListener = {
+                                    showImageSourceDialog(false)
+                                }
+                                plusIconAfter.visibility = View.GONE
+                                controlsAfter.visibility = View.VISIBLE
+                            }
+                            
+                            // Clear references after successful load
+                            cameraImageUri = null
+                            cameraImageFile = null
+                        } catch (e: Exception) {
+                            Toast.makeText(this@MainActivity, "Error loading camera image: ${e.message}", Toast.LENGTH_SHORT).show()
+                            e.printStackTrace()
+                        }
+                    }
+                } else {
+                    // If all methods failed
+                    runOnUiThread {
+                        Toast.makeText(this@MainActivity, "Error: Could not find camera image. Please try again.", Toast.LENGTH_LONG).show()
+                        cameraImageUri = null
+                        cameraImageFile = null
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this@MainActivity, "Error loading camera image: ${e.message}", Toast.LENGTH_SHORT).show()
+                    e.printStackTrace()
+                }
+            }
+        }.start()
+    }
+    
+    private fun loadImageToSlot(bitmap: Bitmap, isBefore: Boolean) {
+        // Preserve the other slot's bitmap to prevent it from being cleared
+        val otherBitmap = if (isBefore) afterBitmap else beforeBitmap
+        
+        if (isBefore) {
+            beforeBitmap = bitmap
+                           imageViewBefore.setImageBitmap(beforeBitmap)
+                    imageViewBefore.setOverlayText("BEFORE")
+                    imageViewBefore.onTextClickListener = {
+                        showTextEditDialog(imageViewBefore, "Edit Before Text")
+                    }
+                    imageViewBefore.onImageClickListener = {
+                showImageSourceDialog(true)
+                    }
+                                               plusIconBefore.visibility = View.GONE
+                           controlsBefore.visibility = View.VISIBLE
+            
+            // Ensure the other slot's image is still displayed if it was previously loaded
+            if (otherBitmap != null) {
+                // Re-apply the other slot's bitmap to ensure it's still visible
+                imageViewAfter.setImageBitmap(afterBitmap)
+                if (controlsAfter.visibility != View.VISIBLE) {
+                    plusIconAfter.visibility = View.GONE
+                    controlsAfter.visibility = View.VISIBLE
+                }
+            }
+        } else {
+            afterBitmap = bitmap
                            imageViewAfter.setImageBitmap(afterBitmap)
                     imageViewAfter.setOverlayText("AFTER")
                     imageViewAfter.onTextClickListener = {
                         showTextEditDialog(imageViewAfter, "Edit After Text")
                     }
                     imageViewAfter.onImageClickListener = {
-                        selectAfterImage() // Allow replacing the image
+                showImageSourceDialog(false)
                     }
                                                plusIconAfter.visibility = View.GONE
                            controlsAfter.visibility = View.VISIBLE
-                } catch (e: IOException) {
-                    Toast.makeText(this, "Error loading after image", Toast.LENGTH_SHORT).show()
+            
+            // Ensure the other slot's image is still displayed if it was previously loaded
+            if (otherBitmap != null) {
+                // Re-apply the other slot's bitmap to ensure it's still visible
+                imageViewBefore.setImageBitmap(beforeBitmap)
+                if (controlsBefore.visibility != View.VISIBLE) {
+                    plusIconBefore.visibility = View.GONE
+                    controlsBefore.visibility = View.VISIBLE
                 }
             }
         }
     }
+    
+    private fun loadImageFromUri(imageUri: Uri, isBefore: Boolean) {
+        try {
+            // Preserve the other slot's bitmap to prevent it from being cleared
+            val otherBitmap = if (isBefore) afterBitmap else beforeBitmap
+            
+            val originalBitmap = if (imageUri.scheme == "file") {
+                // For file:// URIs, read directly from file
+                android.graphics.BitmapFactory.decodeFile(imageUri.path)
+            } else {
+                // For content:// URIs, use ContentResolver with InputStream (modern approach)
+                try {
+                    contentResolver.openInputStream(imageUri)?.use { inputStream ->
+                        android.graphics.BitmapFactory.decodeStream(inputStream)
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    null
+                }
+            } ?: run {
+                Toast.makeText(this, "Error: Could not load image", Toast.LENGTH_SHORT).show()
+                return
+            }
+            
+            val fixedBitmap = fixImageOrientation(originalBitmap, imageUri)
+            
+            if (isBefore) {
+                beforeBitmap = fixedBitmap
+                imageViewBefore.setImageBitmap(beforeBitmap)
+                imageViewBefore.setOverlayText("BEFORE")
+                imageViewBefore.onTextClickListener = {
+                    showTextEditDialog(imageViewBefore, "Edit Before Text")
+                }
+                imageViewBefore.onImageClickListener = {
+                    showImageSourceDialog(true)
+                }
+                plusIconBefore.visibility = View.GONE
+                controlsBefore.visibility = View.VISIBLE
+                
+                // Ensure the other slot's image is still displayed
+                if (otherBitmap != null && imageViewAfter.drawable == null) {
+                    imageViewAfter.setImageBitmap(otherBitmap)
+                }
+            } else {
+                afterBitmap = fixedBitmap
+                           imageViewAfter.setImageBitmap(afterBitmap)
+                    imageViewAfter.setOverlayText("AFTER")
+                    imageViewAfter.onTextClickListener = {
+                        showTextEditDialog(imageViewAfter, "Edit After Text")
+                    }
+                    imageViewAfter.onImageClickListener = {
+                    showImageSourceDialog(false)
+                    }
+                                               plusIconAfter.visibility = View.GONE
+                           controlsAfter.visibility = View.VISIBLE
+                
+                // Ensure the other slot's image is still displayed
+                if (otherBitmap != null && imageViewBefore.drawable == null) {
+                    imageViewBefore.setImageBitmap(otherBitmap)
+                }
+            }
+        } catch (e: IOException) {
+            Toast.makeText(this, "Error loading image", Toast.LENGTH_SHORT).show()
+            e.printStackTrace()
+        }
+    }
 
         private fun setupClickListeners() {
-        // Make entire image container clickable
-        beforeImageContainer.setOnClickListener { selectBeforeImage() }
-        afterImageContainer.setOnClickListener { selectAfterImage() }
+        // Make entire image container clickable (only when no image is loaded)
+        beforeImageContainer.setOnClickListener { 
+            if (beforeBitmap == null) {
+                showImageSourceDialog(true)
+            }
+        }
+        afterImageContainer.setOnClickListener { 
+            if (afterBitmap == null) {
+                showImageSourceDialog(false)
+            }
+        }
         
         buttonExport.setOnClickListener { exportCombinedImage() }
         
@@ -175,7 +654,7 @@ class MainActivity : AppCompatActivity() {
         rotateBeforeButton.setOnClickListener { imageViewBefore.rotateImage() }
         rotateAfterButton.setOnClickListener { imageViewAfter.rotateImage() }
         
-        // Text editing controls
+        // Text editing controls - these should work directly without opening gallery
         editTextBeforeButton.setOnClickListener { 
             showTextEditDialog(imageViewBefore, "Edit Before Text")
         }
@@ -184,18 +663,148 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun selectBeforeImage() {
-        val intent = Intent(Intent.ACTION_PICK).apply {
-            type = "image/*"
+    private fun showImageSourceDialog(isBefore: Boolean) {
+        // Create a bottom sheet style layout with rounded top corners and 90% opacity
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(32, 24, 32, 32)
+            background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bottom_sheet_background)
         }
-        beforeImageLauncher.launch(intent)
+        
+        // Title (lighter weight)
+        val titleText = TextView(this).apply {
+            text = "Choose Source"
+            textSize = 18f
+            setTextColor(ContextCompat.getColor(this@MainActivity, android.R.color.black))
+            gravity = android.view.Gravity.CENTER
+            setPadding(0, 0, 0, 0)
+            setTypeface(null, android.graphics.Typeface.NORMAL) // Lighter weight instead of BOLD
+        }
+        layout.addView(titleText)
+        
+        // Spacer to push icons down towards middle (reduced weight to move icons up more)
+        val topSpacer = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0
+            ).apply {
+                weight = 0.1f // Further reduced to move icons up a bit more
+            }
+        }
+        layout.addView(topSpacer)
+        
+        // Bottom spacer to prevent icons from touching bottom
+        val bottomSpacer = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                56 // Increased bottom spacer to move icons up more
+            )
+        }
+        
+        // Icons row
+        val iconsRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER
+            setPadding(0, 0, 0, 0)
+        }
+        
+        // Gallery icon (add_photo_alternate) - bigger and further apart
+        val galleryIcon = ImageView(this).apply {
+            setImageResource(R.drawable.ic_add_photo_alternate)
+            layoutParams = LinearLayout.LayoutParams(120, 120).apply {
+                marginEnd = 96  // Increased spacing between icons
+            }
+            isClickable = true
+            isFocusable = true
+        }
+        
+        // Camera icon (photo_camera) - bigger
+        val cameraIcon = ImageView(this).apply {
+            setImageResource(R.drawable.ic_photo_camera)
+            layoutParams = LinearLayout.LayoutParams(120, 120)
+            isClickable = true
+            isFocusable = true
+        }
+        
+        iconsRow.addView(galleryIcon)
+        iconsRow.addView(cameraIcon)
+        layout.addView(iconsRow)
+        layout.addView(bottomSpacer)
+        
+        // Create bottom sheet dialog - make it 75% taller
+        val dialog = android.app.Dialog(this)
+        dialog.setContentView(layout)
+        val displayMetrics = resources.displayMetrics
+        val screenHeight = displayMetrics.heightPixels
+        val dialogHeight = (screenHeight * 0.175).toInt() // 75% taller (was ~10%, now ~17.5%)
+        dialog.window?.setLayout(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            dialogHeight
+        )
+        dialog.window?.setGravity(android.view.Gravity.BOTTOM)
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+        
+        // Set click listeners
+        cameraIcon.setOnClickListener {
+            dialog.dismiss()
+            openCamera(isBefore)
+        }
+        
+        galleryIcon.setOnClickListener {
+            dialog.dismiss()
+            selectFromGallery(isBefore)
+        }
+        
+        dialog.show()
     }
-
-    private fun selectAfterImage() {
-        val intent = Intent(Intent.ACTION_PICK).apply {
+    
+    private fun selectFromGallery(isBefore: Boolean) {
+        // Use ACTION_GET_CONTENT instead of ACTION_PICK to avoid folder navigation
+        val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
             type = "image/*"
+            addCategory(Intent.CATEGORY_OPENABLE)
         }
+        if (isBefore) {
+            beforeImageLauncher.launch(intent)
+        } else {
         afterImageLauncher.launch(intent)
+        }
+    }
+    
+    private fun openCamera(isBefore: Boolean) {
+        // Check camera permission
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) 
+            != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.CAMERA),
+                PERMISSION_REQUEST_CODE
+            )
+            return
+        }
+        
+        try {
+            isCameraForBefore = isBefore
+            
+            // Launch custom camera activity
+            val intent = Intent(this, CameraActivity::class.java)
+            
+            // Use fade animation for smooth transition
+            val options = androidx.core.app.ActivityOptionsCompat.makeCustomAnimation(
+                this,
+                android.R.anim.fade_in,
+                android.R.anim.fade_out
+            )
+            
+            if (isBefore) {
+                beforeCameraLauncher.launch(intent, options)
+            } else {
+                afterCameraLauncher.launch(intent, options)
+            }
+        } catch (e: Exception) {
+            Toast.makeText(this, "Error opening camera: ${e.message}", Toast.LENGTH_SHORT).show()
+            e.printStackTrace()
+        }
     }
 
 
@@ -268,25 +877,35 @@ class MainActivity : AppCompatActivity() {
             bitmap.compress(Bitmap.CompressFormat.JPEG, 90, fos)
         }
 
-        // Notify the media scanner so the image appears in the gallery
-        val mediaScanIntent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE).apply {
-            data = Uri.fromFile(imageFile)
-        }
-        sendBroadcast(mediaScanIntent)
+        // Notify the media scanner so the image appears in the gallery (modern approach)
+        MediaScannerConnection.scanFile(
+            this,
+            arrayOf(imageFile.absolutePath),
+            null,
+            null
+        )
     }
 
     private fun checkPermissions() {
-        val permissions = arrayOf(
-            Manifest.permission.READ_EXTERNAL_STORAGE,
-            Manifest.permission.WRITE_EXTERNAL_STORAGE
-        )
+        val permissions = mutableListOf<String>()
+        
+        // Storage permissions (for older Android versions)
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+            permissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        } else {
+            permissions.add(Manifest.permission.READ_MEDIA_IMAGES)
+        }
+        
+        // Camera permission
+        permissions.add(Manifest.permission.CAMERA)
 
         val allPermissionsGranted = permissions.all { permission ->
             ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
         }
 
         if (!allPermissionsGranted) {
-            ActivityCompat.requestPermissions(this, permissions, PERMISSION_REQUEST_CODE)
+            ActivityCompat.requestPermissions(this, permissions.toTypedArray(), PERMISSION_REQUEST_CODE)
         }
     }
 
@@ -326,18 +945,265 @@ class MainActivity : AppCompatActivity() {
                val imageView = ImageView(this)
                imageView.setImageBitmap(bitmap)
                imageView.scaleType = ImageView.ScaleType.FIT_CENTER
+        imageView.adjustViewBounds = true
                
                val message = "Your before & after comparison has been saved to your gallery."
                
-               AlertDialog.Builder(this)
+        // Create a frame layout for share icon with white circle frame
+        val shareContainer = FrameLayout(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+        
+        // White circle frame background (double size: 128x128)
+        val circleFrame = View(this).apply {
+            background = ContextCompat.getDrawable(this@MainActivity, R.drawable.share_icon_circle)
+            layoutParams = FrameLayout.LayoutParams(128, 128).apply {
+                gravity = android.view.Gravity.CENTER
+            }
+        }
+        
+        // Share icon (white Material style - double size: 64x64)
+        val shareIcon = ImageView(this).apply {
+            setImageResource(R.drawable.ic_share)
+            layoutParams = FrameLayout.LayoutParams(64, 64).apply {
+                gravity = android.view.Gravity.CENTER
+            }
+            isClickable = true
+            isFocusable = true
+        }
+        
+        // Make the entire container clickable with larger touch area
+        shareContainer.setOnClickListener {
+            showShareLoadingIndicator()
+            shareImage(bitmap)
+        }
+        
+        // Also make icon clickable as backup
+        shareIcon.setOnClickListener {
+            showShareLoadingIndicator()
+            shareImage(bitmap)
+        }
+        
+        // Increase touch area by adding padding
+        shareContainer.setPadding(20, 20, 20, 20)
+        shareContainer.isClickable = true
+        shareContainer.isFocusable = true
+        
+        shareContainer.addView(circleFrame)
+        shareContainer.addView(shareIcon)
+        
+        val buttonLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = android.view.Gravity.CENTER
+            setPadding(24, 8, 24, 8)
+        }
+        buttonLayout.addView(shareContainer)
+        
+        val dialogLayout = createDialogLayout(imageView, buttonLayout)
+        
+        val dialog = AlertDialog.Builder(this)
                    .setTitle("Export Complete!")
                    .setMessage(message)
-                   .setView(imageView)
-                   .setPositiveButton("Great!") { _, _ -> }
-                   .setNeutralButton("Download") { _, _ ->
-                       downloadToDownloads(bitmap)
-                   }
-                   .show()
+            .setView(dialogLayout)
+            .setPositiveButton("See in Photos") { _, _ ->
+                // Open the phone's Pictures folder (where images are saved)
+                try {
+                    // Try opening Pictures folder using DocumentsProvider
+                    val picturesIntent = Intent(Intent.ACTION_VIEW).apply {
+                        data = Uri.parse("content://com.android.externalstorage.documents/document/primary%3APictures")
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    
+                    try {
+                        startActivity(picturesIntent)
+                    } catch (e: Exception) {
+                        // Fallback: Try opening with MediaStore (general gallery)
+                        val mediaIntent = Intent(Intent.ACTION_VIEW).apply {
+                            data = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                        try {
+                            startActivity(mediaIntent)
+                        } catch (e2: Exception) {
+                            // Final fallback: open any gallery app
+                            val galleryIntent = Intent(Intent.ACTION_VIEW).apply {
+                                data = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            try {
+                                startActivity(galleryIntent)
+                            } catch (e3: Exception) {
+                                Toast.makeText(this, "Could not open gallery", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(this, "Could not open gallery", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setCancelable(true)
+            .create()
+        
+        // Handle clicking outside to dismiss and reset
+        dialog.setOnCancelListener {
+            resetApp()
+        }
+        
+        dialog.show()
+        
+        // Make the "See in Photos" button text white and center it at bottom
+        val seeInPhotosButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+        seeInPhotosButton?.setTextColor(ContextCompat.getColor(this, android.R.color.white))
+        
+        // Center the button by wrapping it in a centered container
+        seeInPhotosButton?.parent?.let { parent ->
+            if (parent is ViewGroup) {
+                val parentLayout = parent as ViewGroup
+                val buttonIndex = parentLayout.indexOfChild(seeInPhotosButton)
+                if (buttonIndex >= 0) {
+                    parentLayout.removeViewAt(buttonIndex)
+                    val centeredContainer = LinearLayout(this).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = android.view.Gravity.CENTER
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT
+                        )
+                    }
+                    centeredContainer.addView(seeInPhotosButton)
+                    parentLayout.addView(centeredContainer, buttonIndex)
+                }
+            }
+        }
+    }
+    
+    private fun createDialogLayout(imageView: ImageView, buttonLayout: LinearLayout): View {
+        val mainLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(16, 8, 16, 8) // Reduced top/bottom padding
+        }
+        
+        // Add image view with constraints (reduced height)
+        val imageParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            height = resources.displayMetrics.heightPixels / 3 // Reduced from /2 to /3
+        }
+        imageView.layoutParams = imageParams
+        mainLayout.addView(imageView)
+        
+        // Add spacing (reduced)
+        val spacer = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                8 // Reduced from 16 to 8
+            )
+        }
+        mainLayout.addView(spacer)
+        
+        // Add share icon container (centered)
+        mainLayout.addView(buttonLayout)
+        
+        return mainLayout
+    }
+    
+    private fun shareImage(bitmap: Bitmap) {
+        // Save file in background thread for faster response
+        Thread {
+            try {
+                // Save bitmap to a temporary file in cache directory
+                val cacheDir = File(cacheDir, "shared_images")
+                if (!cacheDir.exists()) {
+                    cacheDir.mkdirs()
+                }
+                
+                val imageFile = File(cacheDir, "before_after_${System.currentTimeMillis()}.jpg")
+                FileOutputStream(imageFile).use { fos ->
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 90, fos)
+                }
+                
+                // Use FileProvider for secure file sharing (required for Android 7+)
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    this,
+                    "${packageName}.fileprovider",
+                    imageFile
+                )
+                
+                // Create share intent on main thread
+                runOnUiThread {
+                    hideShareLoadingIndicator()
+                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "image/jpeg"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        putExtra(Intent.EXTRA_TEXT, "Check out my before and after comparison! Powered by traaacks.com")
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    
+                    startActivity(Intent.createChooser(shareIntent, "Share via"))
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    hideShareLoadingIndicator()
+                    Toast.makeText(this, "Error sharing image: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+                e.printStackTrace()
+            }
+        }.start()
+    }
+    
+    private fun showShareLoadingIndicator() {
+        // Create a semi-transparent overlay with a progress indicator
+        val rootView = window.decorView.rootView as? android.view.ViewGroup ?: return
+        
+        // Remove existing overlay if any
+        hideShareLoadingIndicator()
+        
+        val overlay = FrameLayout(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+            setBackgroundColor(0x80000000.toInt()) // Semi-transparent black (50% opacity)
+            alpha = 0f
+        }
+        
+        val progressBar = android.widget.ProgressBar(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                gravity = android.view.Gravity.CENTER
+            }
+            indeterminateTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.WHITE)
+        }
+        
+        overlay.addView(progressBar)
+        rootView.addView(overlay)
+        shareLoadingOverlay = overlay
+        
+        // Animate fade in
+        overlay.animate()
+            .alpha(1f)
+            .setDuration(200)
+            .start()
+    }
+    
+    private fun hideShareLoadingIndicator() {
+        shareLoadingOverlay?.let { overlay ->
+            overlay.animate()
+                .alpha(0f)
+                .setDuration(200)
+                .withEndAction {
+                    val parent = overlay.parent as? android.view.ViewGroup
+                    parent?.removeView(overlay)
+                    shareLoadingOverlay = null
+                }
+                .start()
+        }
            }
     
     private fun downloadToDownloads(bitmap: Bitmap) {
@@ -456,6 +1322,20 @@ class MainActivity : AppCompatActivity() {
     /**
      * Fixes image orientation based on EXIF data
      */
+    private fun resetApp() {
+        // Reset all images and UI to initial state
+        beforeBitmap = null
+        afterBitmap = null
+        imageViewBefore.setImageDrawable(null)
+        imageViewAfter.setImageDrawable(null)
+        plusIconBefore.visibility = View.VISIBLE
+        plusIconAfter.visibility = View.VISIBLE
+        controlsBefore.visibility = View.GONE
+        controlsAfter.visibility = View.GONE
+        imageViewBefore.setOverlayText("BEFORE")
+        imageViewAfter.setOverlayText("AFTER")
+    }
+    
     private fun fixImageOrientation(bitmap: Bitmap, imageUri: Uri): Bitmap {
         try {
             val inputStream = contentResolver.openInputStream(imageUri)
@@ -478,6 +1358,4 @@ class MainActivity : AppCompatActivity() {
             return bitmap // Return original if there's an error
         }
     }
-    
-
 }
