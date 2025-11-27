@@ -1,0 +1,24 @@
+<resources>
+    <string name="app_name">Before and After</string>
+    <string name="before_after_title">Before &amp; After</string>
+    <string name="before_label">BEFORE</string>
+    <string name="after_label">AFTER</string>
+    <string name="select_before">Select Before Photo</string>
+    <string name="select_after">Select After Photo</string>
+    <string name="export_image">Export Side-by-Side Image</string>
+    <string name="before_image_desc">Before photo</string>
+    <string name="after_image_desc">After photo</string>
+    <string name="add_before_photo">Add before photo</string>
+    <string name="add_after_photo">Add after photo</string>
+    <string name="pinch_to_zoom_hint">Tap + to add photos, pinch to zoom, drag to crop, tap text to edit</string>
+    <string name="rotate_before">Rotate before image</string>
+    <string name="rotate_after">Rotate after image</string>
+    <string name="edit_text_before">Edit before text</string>
+    <string name="edit_text_after">Edit after text</string>
+    <string name="enter_text">Enter text</string>
+    <string name="text_dialog_title">Edit Text Overlay</string>
+    <string name="privacy_policy">Privacy Policy</string>
+    <string name="privacy_policy_url">https://drive.google.com/file/d/16EwV8df31o4cEEHSpYsuA1zlysUf6QN3/view?usp=drive_link</string>
+    <string name="app_description">Create stunning before and after photo comparisons with ease. Perfect for fitness transformations, home renovations, makeovers, and more!</string>
+    <string name="ready_to_share">Ready to share?</string>
+</resources>

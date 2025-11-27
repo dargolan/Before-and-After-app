@@ -1,0 +1,242 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/gradient_background"
+    android:padding="16dp">
+
+    <!-- Bigger Logo - Centered -->
+    <ImageView
+        android:id="@+id/appLogo"
+        android:layout_width="120dp"
+        android:layout_height="120dp"
+        android:src="@drawable/logo"
+        android:layout_centerHorizontal="true"
+        android:layout_marginTop="24dp"
+        android:layout_marginBottom="24dp"
+        android:contentDescription="App logo" />
+
+    <!-- Main Content Card - Hugs content -->
+    <LinearLayout
+        android:id="@+id/mainContentCard"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/appLogo"
+        android:orientation="vertical"
+        android:background="@drawable/card_background"
+        android:padding="20dp"
+        android:layout_marginBottom="16dp">
+
+        <!-- Smaller Image Workspaces -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center">
+
+            <!-- Before Section -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginEnd="8dp">
+
+                <TextView
+                    android:layout_width="150dp"
+                    android:layout_height="wrap_content"
+                    android:text="@string/before_label"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:textColor="#666666"
+                    android:gravity="center"
+                    android:layout_marginBottom="8dp" />
+
+                <FrameLayout
+                    android:id="@+id/beforeImageContainer"
+                    android:layout_width="150dp"
+                    android:layout_height="200dp"
+                    android:background="#F5F5F5"
+                    android:clickable="true"
+                    android:focusable="true">
+
+                    <com.beforeafter.app.ZoomableImageView
+                        android:id="@+id/imageViewBefore"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:scaleType="matrix"
+                        android:contentDescription="@string/before_image_desc" />
+
+                    <ImageView
+                        android:id="@+id/plusIconBefore"
+                        android:layout_width="50dp"
+                        android:layout_height="50dp"
+                        android:layout_gravity="center"
+                        android:src="@drawable/gradient_plus_icon"
+                        android:contentDescription="@string/add_before_photo" />
+
+                    <LinearLayout
+                        android:id="@+id/controlsBefore"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="top|end"
+                        android:orientation="vertical"
+                        android:visibility="gone"
+                        android:layout_margin="6dp">
+
+                        <ImageView
+                            android:id="@+id/rotateBeforeButton"
+                            android:layout_width="28dp"
+                            android:layout_height="28dp"
+                            android:src="@drawable/ic_rotate"
+                            android:background="@drawable/control_button_background"
+                            android:contentDescription="@string/rotate_before"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:layout_marginBottom="4dp" />
+
+                        <ImageView
+                            android:id="@+id/editTextBeforeButton"
+                            android:layout_width="28dp"
+                            android:layout_height="28dp"
+                            android:src="@drawable/ic_text"
+                            android:background="@drawable/control_button_background"
+                            android:contentDescription="@string/edit_text_before"
+                            android:clickable="true"
+                            android:focusable="true" />
+                    </LinearLayout>
+                </FrameLayout>
+            </LinearLayout>
+
+            <!-- After Section -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginStart="8dp">
+
+                <TextView
+                    android:layout_width="150dp"
+                    android:layout_height="wrap_content"
+                    android:text="@string/after_label"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:textColor="#666666"
+                    android:gravity="center"
+                    android:layout_marginBottom="8dp" />
+
+                <FrameLayout
+                    android:id="@+id/afterImageContainer"
+                    android:layout_width="150dp"
+                    android:layout_height="200dp"
+                    android:background="#F5F5F5"
+                    android:clickable="true"
+                    android:focusable="true">
+
+                    <com.beforeafter.app.ZoomableImageView
+                        android:id="@+id/imageViewAfter"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:scaleType="matrix"
+                        android:contentDescription="@string/after_image_desc" />
+
+                    <ImageView
+                        android:id="@+id/plusIconAfter"
+                        android:layout_width="50dp"
+                        android:layout_height="50dp"
+                        android:layout_gravity="center"
+                        android:src="@drawable/gradient_plus_icon"
+                        android:contentDescription="@string/add_after_photo" />
+
+                    <LinearLayout
+                        android:id="@+id/controlsAfter"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="top|end"
+                        android:orientation="vertical"
+                        android:visibility="gone"
+                        android:layout_margin="6dp">
+
+                        <ImageView
+                            android:id="@+id/rotateAfterButton"
+                            android:layout_width="28dp"
+                            android:layout_height="28dp"
+                            android:src="@drawable/ic_rotate"
+                            android:background="@drawable/control_button_background"
+                            android:contentDescription="@string/rotate_after"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:layout_marginBottom="4dp" />
+
+                        <ImageView
+                            android:id="@+id/editTextAfterButton"
+                            android:layout_width="28dp"
+                            android:layout_height="28dp"
+                            android:src="@drawable/ic_text"
+                            android:background="@drawable/control_button_background"
+                            android:contentDescription="@string/edit_text_after"
+                            android:clickable="true"
+                            android:focusable="true" />
+                    </LinearLayout>
+                </FrameLayout>
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Export Section Card - Always visible -->
+    <LinearLayout
+        android:id="@+id/exportSection"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/mainContentCard"
+        android:orientation="vertical"
+        android:background="@drawable/card_background"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Ready to share?"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="#333333"
+            android:gravity="center"
+            android:layout_marginBottom="6dp" />
+
+
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Export your before and after comparison as a single image"
+            android:textSize="13sp"
+            android:textColor="#666666"
+            android:gravity="center"
+            android:layout_marginBottom="16dp" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/buttonExport"
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:text="Export Image"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="@android:color/white"
+            android:background="@drawable/export_button_background" />
+    </LinearLayout>
+
+    <!-- Footer -->
+    <TextView
+        android:id="@+id/footerText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:layout_marginBottom="8dp"
+        android:gravity="center"
+        android:text="Powered by traaacks.com"
+        android:textColor="#FFFFFF"
+        android:textSize="12sp"
+        android:alpha="0.8"
+        android:clickable="true"
+        android:focusable="true" />
+
+</RelativeLayout>
