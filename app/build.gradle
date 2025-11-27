@@ -5,13 +5,13 @@ plugins {
 
 android {
     namespace 'com.beforeafter.app'
-    compileSdk 34
+    compileSdk 35
 
     defaultConfig {
         applicationId "com.traaacks.beforeafterphotoeditor"
         minSdk 21
-        targetSdk 34
-        versionCode 2
+        targetSdk 35
+        versionCode 4
         versionName "1.0.0"
         
         // App metadata for Play Store
@@ -35,6 +35,10 @@ android {
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             signingConfig signingConfigs.release
+            // Enable native debug symbols for crash analysis
+            ndk {
+                debugSymbolLevel 'SYMBOL_TABLE'
+            }
         }
     }
     compileOptions {
