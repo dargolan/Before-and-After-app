@@ -11,7 +11,11 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.View
+import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.*
@@ -19,21 +23,33 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.google.android.material.floatingactionbutton.FloatingActionButton
+import androidx.lifecycle.Observer
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import kotlin.math.max
+import kotlin.math.min
 
 class CameraActivity : AppCompatActivity() {
     
     private lateinit var previewView: PreviewView
-    private lateinit var captureButton: FloatingActionButton
+    private lateinit var captureButton: View
+    private lateinit var flipButton: ImageView
+    private lateinit var flashButton: ImageView
     private var imageCapture: ImageCapture? = null
+    private var camera: Camera? = null
     private var cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private var outputFileUri: Uri? = null
+    private var currentCameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+    private var currentZoomRatio = 1f
+    private var isFlashOn = false
+    
+    // Pinch-to-zoom
+    private lateinit var scaleGestureDetector: ScaleGestureDetector
+    private var baseZoomRatio = 1f
     
     companion object {
         const val EXTRA_OUTPUT_URI = "output_uri"
@@ -43,7 +59,7 @@ class CameraActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // Set up a simple fullscreen camera view
+        // Set up preview view
         previewView = PreviewView(this).apply {
             layoutParams = android.view.ViewGroup.LayoutParams(
                 android.view.ViewGroup.LayoutParams.MATCH_PARENT,
@@ -51,17 +67,88 @@ class CameraActivity : AppCompatActivity() {
             )
         }
         
-        captureButton = FloatingActionButton(this).apply {
-            layoutParams = android.widget.FrameLayout.LayoutParams(
-                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
-                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                gravity = android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL
-                bottomMargin = 64
+        // Set up pinch-to-zoom gesture detector
+        scaleGestureDetector = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                val scaleFactor = detector.scaleFactor
+                val newZoom = baseZoomRatio * scaleFactor
+                camera?.cameraControl?.let { control ->
+                    val zoomState = camera?.cameraInfo?.zoomState?.value
+                    val minZoom = zoomState?.minZoomRatio ?: 1f
+                    val maxZoom = zoomState?.maxZoomRatio ?: 1f
+                    val clampedZoom = newZoom.coerceIn(minZoom, maxZoom)
+                    control.setZoomRatio(clampedZoom)
+                    currentZoomRatio = clampedZoom
+                }
+                return true
             }
-            setImageResource(android.R.drawable.ic_menu_camera)
+            
+            override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
+                baseZoomRatio = currentZoomRatio
+                return true
+            }
+        })
+        
+        // Override touch event to handle pinch-to-zoom
+        previewView.setOnTouchListener { _, event ->
+            scaleGestureDetector.onTouchEvent(event)
+            true
+        }
+        
+        // Create black bottom bar with proper layout - same size as toast (17.5% of screen height)
+        val displayMetrics = resources.displayMetrics
+        val screenHeight = displayMetrics.heightPixels
+        val bottomBarHeight = (screenHeight * 0.175).toInt() // Same as toast height
+        
+        val bottomBar = android.widget.FrameLayout(this).apply {
+            background = ContextCompat.getDrawable(this@CameraActivity, R.drawable.camera_bottom_bar)
+            layoutParams = android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                bottomBarHeight
+            ).apply {
+                gravity = android.view.Gravity.BOTTOM
+            }
+            setPadding(32, 24, 32, 32)
+        }
+        
+        // White circle capture button (no icon) - centered, 20% bigger (144x144)
+        captureButton = View(this).apply {
+            background = ContextCompat.getDrawable(this@CameraActivity, R.drawable.capture_button_circle)
+            layoutParams = android.widget.FrameLayout.LayoutParams(144, 144).apply {
+                gravity = android.view.Gravity.CENTER_HORIZONTAL or android.view.Gravity.CENTER_VERTICAL
+            }
+            isClickable = true
+            isFocusable = true
             setOnClickListener { takePhoto() }
         }
+        
+        // Flash button - positioned on the left
+        flashButton = ImageView(this).apply {
+            setImageResource(R.drawable.ic_flash_off)
+            layoutParams = android.widget.FrameLayout.LayoutParams(80, 80).apply {
+                gravity = android.view.Gravity.START or android.view.Gravity.CENTER_VERTICAL
+                marginStart = 32
+            }
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { toggleFlash() }
+        }
+        
+        // Flip camera button - positioned on the right, much bigger
+        flipButton = ImageView(this).apply {
+            setImageResource(R.drawable.ic_flip_camera)
+            layoutParams = android.widget.FrameLayout.LayoutParams(80, 80).apply {
+                gravity = android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL
+                marginEnd = 32
+            }
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { flipCamera() }
+        }
+        
+        bottomBar.addView(flashButton)
+        bottomBar.addView(captureButton)
+        bottomBar.addView(flipButton)
         
         val container = android.widget.FrameLayout(this).apply {
             layoutParams = android.view.ViewGroup.LayoutParams(
@@ -69,7 +156,7 @@ class CameraActivity : AppCompatActivity() {
                 android.view.ViewGroup.LayoutParams.MATCH_PARENT
             )
             addView(previewView)
-            addView(captureButton)
+            addView(bottomBar)
         }
         
         setContentView(container)
@@ -124,25 +211,73 @@ class CameraActivity : AppCompatActivity() {
                 .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                 .build()
             
-            // Select back camera
-            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-            
             try {
                 // Unbind use cases before rebinding
                 cameraProvider.unbindAll()
                 
                 // Bind use cases to camera
-                cameraProvider.bindToLifecycle(
+                camera = cameraProvider.bindToLifecycle(
                     this,
-                    cameraSelector,
+                    currentCameraSelector,
                     preview,
                     imageCapture
                 )
+                
+                // Check if camera has flash and update button visibility/state
+                val hasFlash = camera?.cameraInfo?.hasFlashUnit() ?: false
+                flashButton.visibility = if (hasFlash) View.VISIBLE else View.INVISIBLE
+                if (!hasFlash) {
+                    isFlashOn = false
+                    flashButton.setImageResource(R.drawable.ic_flash_off)
+                }
+                
+                // Observe zoom state changes
+                camera?.cameraInfo?.zoomState?.observe(this@CameraActivity, Observer { zoomState ->
+                    currentZoomRatio = zoomState.zoomRatio
+                })
+                
+                // Initialize zoom ratio
+                val initialZoomState = camera?.cameraInfo?.zoomState?.value
+                currentZoomRatio = initialZoomState?.zoomRatio ?: 1f
+                baseZoomRatio = currentZoomRatio
             } catch (exc: Exception) {
                 Toast.makeText(this, "Use case binding failed", Toast.LENGTH_SHORT).show()
                 exc.printStackTrace()
             }
         }, ContextCompat.getMainExecutor(this))
+    }
+    
+    private fun flipCamera() {
+        // Turn off flash when flipping (front cameras don't have flash)
+        if (isFlashOn) {
+            isFlashOn = false
+            camera?.cameraControl?.enableTorch(false)
+            flashButton.setImageResource(R.drawable.ic_flash_off)
+        }
+        
+        currentCameraSelector = if (currentCameraSelector == CameraSelector.DEFAULT_BACK_CAMERA) {
+            CameraSelector.DEFAULT_FRONT_CAMERA
+        } else {
+            CameraSelector.DEFAULT_BACK_CAMERA
+        }
+        startCamera()
+    }
+    
+    private fun toggleFlash() {
+        // Check if camera has flash capability
+        val hasFlash = camera?.cameraInfo?.hasFlashUnit() ?: false
+        if (!hasFlash) {
+            Toast.makeText(this, "Flash not available on this camera", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        isFlashOn = !isFlashOn
+        camera?.cameraControl?.enableTorch(isFlashOn)
+        
+        // Update icon
+        flashButton.setImageResource(
+            if (isFlashOn) R.drawable.ic_flash_on else R.drawable.ic_flash_off
+        )
     }
     
     private fun takePhoto() {
@@ -206,4 +341,3 @@ class CameraActivity : AppCompatActivity() {
         cameraExecutor.shutdown()
     }
 }
-

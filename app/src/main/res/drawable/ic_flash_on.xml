@@ -1,0 +1,11 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="40dp"
+    android:height="40dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <!-- Material Symbols Outlined: flash_on (36dp, wght300, white) -->
+    <!-- Path converted from SVG viewBox 0 -960 960 960 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M470.26,655.13l172.31,-249.11H513.26l73.87,-255.76H357.95v339.48h112.31v165.39ZM420,816.92V420H307.69v-440h345.77L580,355.77h158.08L420,816.92Zm50.26,-327.18H357.95h112.31Z"/>
+</vector>

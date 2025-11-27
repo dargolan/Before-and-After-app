@@ -1043,12 +1043,19 @@ class MainActivity : AppCompatActivity() {
                 } catch (e: Exception) {
                     Toast.makeText(this, "Could not open gallery", Toast.LENGTH_SHORT).show()
                 }
+                // Reset app after opening gallery
+                resetApp()
             }
             .setCancelable(true)
             .create()
         
         // Handle clicking outside to dismiss and reset
         dialog.setOnCancelListener {
+            resetApp()
+        }
+        
+        // Also handle dismiss to ensure reset happens in all cases
+        dialog.setOnDismissListener {
             resetApp()
         }
         
@@ -1332,8 +1339,14 @@ class MainActivity : AppCompatActivity() {
         plusIconAfter.visibility = View.VISIBLE
         controlsBefore.visibility = View.GONE
         controlsAfter.visibility = View.GONE
+        // Reset text overlay - ensure it's visible and set to default text
+        imageViewBefore.showTextOverlay(true)
+        imageViewAfter.showTextOverlay(true)
         imageViewBefore.setOverlayText("BEFORE")
         imageViewAfter.setOverlayText("AFTER")
+        // Force redraw
+        imageViewBefore.invalidate()
+        imageViewAfter.invalidate()
     }
     
     private fun fixImageOrientation(bitmap: Bitmap, imageUri: Uri): Bitmap {
