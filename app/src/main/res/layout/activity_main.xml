@@ -32,17 +32,20 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:gravity="center">
+            android:gravity="center"
+            android:weightSum="2">
 
             <!-- Before Section -->
             <LinearLayout
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
+                android:layout_weight="1"
                 android:orientation="vertical"
-                android:layout_marginEnd="8dp">
+                android:gravity="center_horizontal"
+                android:layout_marginEnd="4dp">
 
                 <TextView
-                    android:layout_width="150dp"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/before_label"
                     android:textSize="14sp"
@@ -81,7 +84,8 @@
                         android:layout_gravity="top|end"
                         android:orientation="vertical"
                         android:visibility="gone"
-                        android:layout_margin="6dp">
+                        android:layout_marginTop="4dp"
+                        android:layout_marginEnd="4dp">
 
                         <ImageView
                             android:id="@+id/rotateBeforeButton"
@@ -109,13 +113,15 @@
 
             <!-- After Section -->
             <LinearLayout
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
+                android:layout_weight="1"
                 android:orientation="vertical"
-                android:layout_marginStart="8dp">
+                android:gravity="center_horizontal"
+                android:layout_marginStart="4dp">
 
                 <TextView
-                    android:layout_width="150dp"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/after_label"
                     android:textSize="14sp"
@@ -154,7 +160,8 @@
                         android:layout_gravity="top|end"
                         android:orientation="vertical"
                         android:visibility="gone"
-                        android:layout_margin="6dp">
+                        android:layout_marginTop="4dp"
+                        android:layout_marginEnd="4dp">
 
                         <ImageView
                             android:id="@+id/rotateAfterButton"
